@@ -1,5 +1,8 @@
+use arm_pl011::pl011::Pl011Uart;
 use std::io::{self};
-
+#[cfg(feature = "axalloc")]
+#[cfg(feature = "axstd")]
+#[cfg_attr(feature = "axstd", no_mangle)]
 #[cfg(all(not(feature = "axstd"), unix))]
 
 macro_rules! print_err {
@@ -18,7 +21,10 @@ const CMD_TABLE: &[(&str, CmdHandler)] = &[
     ("help", do_help),
     ("uname", do_uname),
     ("ldr", do_ldr),
-    ("str", do_str)
+    ("str", do_str),
+    ("uart", do_uart),
+    ("go", do_go),
+    ("moves", do_moves),
 ];
 
 fn do_uname(_args: &str) {
@@ -52,58 +58,66 @@ fn do_exit(_args: &str) {
 
 fn do_ldr(args: &str) {
     println!("ldr");
+
     if args.is_empty() {
-        println!("try: ldr ffff0000400fe000 / ldr ffff000040080000 ffff000040080008");
+        println!("try: ldr ffff0000400fe000 /ldr ffff000040080000 5");
     }
 
-    fn ldr_one(addr: &str) -> io::Result<()> {
-        println!("addr = {}", addr);
-
+    fn ldr_one(addr: &str, num: i32) -> io::Result<()> {
         if let Ok(parsed_addr) = u64::from_str_radix(addr, 16) {
-            let address: *const u64 = parsed_addr as *const u64; // 强制转换为合适的指针类型
+            let mut address: *const u32 = parsed_addr as *const u32;
 
-            let value: u64;
-            println!("Parsed address: {:p}", address); // 打印地址时使用 %p 格式化符号
-
-            unsafe {
-                value = *address;
+            for _ in 0..num {
+                let value: u32;
+                unsafe {
+                    value = *address;
+                }
+                println!("Value at address {:p}: 0x{:X}", address, value);
+                unsafe {
+                    address = address.add(1);
+                }
             }
-
-            println!("Value at address {}: 0x{:X}", addr, value); // 使用输入的地址打印值
         } else {
             println!("Failed to parse address.");
         }
-        return Ok(());
+        Ok(())
     }
 
-    for addr in args.split_whitespace() {
-        if let Err(e) = ldr_one(addr) {
-            println!("ldr {} {}", addr, e);
+    let mut iter = args.split_whitespace();
+    if let Some(addr) = iter.next() {
+        if let Some(num_str) = iter.next() {
+            let num: i32 = match num_str.parse() {
+                Ok(n) => n,
+                _ => 1,
+            };
+            if let Err(e) = ldr_one(addr, num) {
+                println!("ldr {} {}", addr, e);
+            }
+            return;
+        } else {
+            let num = 1;
+            if let Err(e) = ldr_one(addr, num) {
+                println!("ldr {} {}", addr, e);
+            }
+            return;
         }
     }
 }
-
 
 // use crate::mem::phys_to_virt;
 // use core::ptr::{read_volatile, write_volatile};
 
 fn do_str(args: &str) {
-    println!("str");
     if args.is_empty() {
         println!("try: str ffff0000400fe000 12345678");
     }
 
     fn str_one(addr: &str, val: &str) -> io::Result<()> {
-        println!("addr = {}", addr);
-        println!("val = {}", val);
-
         if let Ok(parsed_addr) = u64::from_str_radix(addr, 16) {
-            let address: *mut u64 = parsed_addr as *mut u64; // 强制转换为合适的指针类型
-            println!("Parsed address: {:p}", address); // 打印地址时使用 %p 格式化符号
+            let address: *mut u32 = parsed_addr as *mut u32; // 强制转换为合适的指针类型
 
-            if let Ok(parsed_val) = u32::from_str_radix(val, 16) {
-                let value: u64 = parsed_val as u64; // 不需要将值转换为指针类型
-                println!("Parsed value: 0x{:X}", value); // 直接打印解析的值
+            if let Ok(parsed_val) = u64::from_str_radix(val, 16) {
+                let value: u32 = parsed_val as u32;
 
                 // let ptr = phys_to_virt(parsed_addr.into()).as_mut_ptr() as *mut u32;
                 unsafe {
@@ -112,7 +126,7 @@ fn do_str(args: &str) {
                     // write_volatile(ptr, value);
                 }
 
-                println!("Write value at address {}: 0x{:X}", addr, value); // 使用输入的地址打印值
+                // println!("Write value at address {}: 0x{:X}", addr, value); // 使用输入的地址打印值
             }
         } else {
             println!("Failed to parse address.");
@@ -124,14 +138,10 @@ fn do_str(args: &str) {
     let mut split_iter = args.split_whitespace();
 
     if let Some(addr) = split_iter.next() {
-        println!("First element: {}", addr);
-
         if let Some(val) = split_iter.next() {
-            println!("Second element: {}", val);
             str_one(addr, val).unwrap(); // 调用 str_one 函数并传递 addr 和 val
         }
     }
-
 }
 
 pub fn run_cmd(line: &[u8]) {
@@ -152,4 +162,289 @@ fn split_whitespace(str: &str) -> (&str, &str) {
     let str = str.trim();
     str.find(char::is_whitespace)
         .map_or((str, ""), |n| (&str[..n], str[n + 1..].trim()))
+}
+
+fn do_go(args: &str) {
+    let str_addr1 = "ffff0000fe200004 246c0";
+    let str_addr2 = "ffff0000fe2000e4 55000000";
+    let str_addr3 = "ffff0000fe201a24 1A";
+    let str_addr4 = "ffff0000fe201a28 3";
+    let str_addr5 = "ffff0000fe201a2c 70";
+    let str_addr6 = "ffff0000fe201a30 301";
+
+    do_str(str_addr1);
+    do_str(str_addr2);
+    do_str(str_addr3);
+    do_str(str_addr4);
+    do_str(str_addr5);
+    do_str(str_addr6);
+
+    let uart_base = 0xffff_0000_fe20_1a00 as *mut u8;
+    let mut uart = Pl011Uart::new(uart_base);
+
+    match args {
+        "f" => {
+            //前进
+            uart.putchar(0xff);
+            uart.putchar(0xfc);
+            uart.putchar(0x07);
+            uart.putchar(0x11);
+            uart.putchar(0x01);
+            uart.putchar(0x01);
+            uart.putchar(0x64);
+            uart.putchar(0x00);
+            uart.putchar(0x7e);
+        }
+        "b" => {
+            //后退
+            uart.putchar(0xff);
+            uart.putchar(0xfc);
+            uart.putchar(0x07);
+            uart.putchar(0x11);
+            uart.putchar(0x01);
+            uart.putchar(0x02);
+            uart.putchar(0x64);
+            uart.putchar(0x00);
+            uart.putchar(0x7f);
+        }
+        "s" => {
+            //停止
+            uart.putchar(0xff);
+            uart.putchar(0xfc);
+            uart.putchar(0x07);
+            uart.putchar(0x11);
+            uart.putchar(0x01);
+            uart.putchar(0x00);
+            uart.putchar(0x00);
+            uart.putchar(0x00);
+            uart.putchar(0x19);
+        }
+        "r" => {
+            //右转
+            uart.putchar(0xff);
+            uart.putchar(0xfc);
+            uart.putchar(0x07);
+            uart.putchar(0x11);
+            uart.putchar(0x01);
+            uart.putchar(0x06);
+            uart.putchar(0x64);
+            uart.putchar(0x00);
+            uart.putchar(0x83);
+        }
+        "l" => {
+            //左转
+            uart.putchar(0xff);
+            uart.putchar(0xfc);
+            uart.putchar(0x07);
+            uart.putchar(0x11);
+            uart.putchar(0x01);
+            uart.putchar(0x05);
+            uart.putchar(0x64);
+            uart.putchar(0x00);
+            uart.putchar(0x82);
+        }
+        "w" => {
+            //鸣笛
+            uart.putchar(0xff);
+            uart.putchar(0xfc);
+            uart.putchar(0x05);
+            uart.putchar(0x02);
+            uart.putchar(0x60);
+            uart.putchar(0x00);
+            uart.putchar(0x67);
+        }
+        _ => {}
+    }
+}
+fn do_uart(args: &str) {
+    match args {
+        "5" => {
+            let str_addr1 = "ffff0000fe200004 246c0";
+            let str_addr2 = "ffff0000fe2000e4 55000000";
+            let str_addr3 = "ffff0000fe201a24 1A";
+            let str_addr4 = "ffff0000fe201a28 3";
+            let str_addr5 = "ffff0000fe201a2c 70";
+            let str_addr6 = "ffff0000fe201a30 301";
+
+            do_str(str_addr1);
+            do_str(str_addr2);
+            do_str(str_addr3);
+            do_str(str_addr4);
+            do_str(str_addr5);
+            do_str(str_addr6);
+        }
+        _ => {}
+    }
+}
+fn do_moves(args: &str) {
+    let str_addr1 = "ffff0000fe200004 246c0";
+    let str_addr2 = "ffff0000fe2000e4 55000000";
+    let str_addr3 = "ffff0000fe201a24 1A";
+    let str_addr4 = "ffff0000fe201a28 3";
+    let str_addr5 = "ffff0000fe201a2c 70";
+    let str_addr6 = "ffff0000fe201a30 301";
+
+    do_str(str_addr1);
+    do_str(str_addr2);
+    do_str(str_addr3);
+    do_str(str_addr4);
+    do_str(str_addr5);
+    do_str(str_addr6);
+
+    let uart_base = 0xffff_0000_fe20_1a00 as *mut u8;
+    let mut uart = Pl011Uart::new(uart_base);
+
+    let mut iter = args.split_whitespace();
+    if let Some(shape) = iter.next() {
+        if let Some(num) = iter.next() {
+            let mount: i32 = match num.parse() {
+                Ok(n) => n,
+                _ => 1,
+            };
+
+            fn delay(seconds: u64) {
+                for i in 1..seconds + 1 {
+                    println!("{} ", i);
+
+                    fn fibonacci_recursive(n: u64) -> u64 {
+                        if n == 0 {
+                            return 0;
+                        }
+                        if n == 1 {
+                            return 1;
+                        }
+                        return fibonacci_recursive(n - 1) + fibonacci_recursive(n - 2);
+                    }
+
+                    fibonacci_recursive(34 + (i % 2));
+                }
+            }
+            match shape {
+                "s" => {
+                    delay(30);
+                    for _ in 0..mount {
+                        println!("forward");
+                        {
+                            // 前进
+                            uart.putchar(0xff);
+                            uart.putchar(0xfc);
+                            uart.putchar(0x07);
+                            uart.putchar(0x11);
+                            uart.putchar(0x01);
+                            uart.putchar(0x01);
+                            uart.putchar(0x64);
+                            uart.putchar(0x00);
+                            uart.putchar(0x7e);
+                        }
+                        delay(4);
+                        println!("stop");
+                        {
+                            // 停止
+                            uart.putchar(0xff);
+                            uart.putchar(0xfc);
+                            uart.putchar(0x07);
+                            uart.putchar(0x11);
+                            uart.putchar(0x01);
+                            uart.putchar(0x00);
+                            uart.putchar(0x00);
+                            uart.putchar(0x00);
+                            uart.putchar(0x19);
+                        }
+                        delay(1);
+                        println!("turn right");
+                        {
+                            // 右转
+                            uart.putchar(0xff);
+                            uart.putchar(0xfc);
+                            uart.putchar(0x07);
+                            uart.putchar(0x11);
+                            uart.putchar(0x01);
+                            uart.putchar(0x06);
+                            uart.putchar(0x64);
+                            uart.putchar(0x00);
+                            uart.putchar(0x83);
+                        }
+                        delay(1);
+                        println!("stop");
+                        {
+                            // 停止
+                            uart.putchar(0xff);
+                            uart.putchar(0xfc);
+                            uart.putchar(0x07);
+                            uart.putchar(0x11);
+                            uart.putchar(0x01);
+                            uart.putchar(0x00);
+                            uart.putchar(0x00);
+                            uart.putchar(0x00);
+                            uart.putchar(0x19);
+                        }
+                        delay(1);
+                    }
+                    delay(1);
+                    {
+                        // 停止
+                        uart.putchar(0xff);
+                        uart.putchar(0xfc);
+                        uart.putchar(0x07);
+                        uart.putchar(0x11);
+                        uart.putchar(0x01);
+                        uart.putchar(0x00);
+                        uart.putchar(0x00);
+                        uart.putchar(0x00);
+                        uart.putchar(0x19);
+                    }
+                }
+                "c" => {
+                    for _ in 0..mount {
+                        delay(10);
+                        println!("前进");
+                        {
+                            //前进
+                            uart.putchar(0xff);
+                            uart.putchar(0xfc);
+                            uart.putchar(0x07);
+                            uart.putchar(0x11);
+                            uart.putchar(0x01);
+                            uart.putchar(0x01);
+                            uart.putchar(0x32);
+                            uart.putchar(0x00);
+                            uart.putchar(0x4c);
+                        }
+                        delay(1);
+                        println!("偏移");
+                        {
+                            //偏航角PID设置
+                            uart.putchar(0xff);
+                            uart.putchar(0xfc);
+                            uart.putchar(0x0a);
+                            uart.putchar(0x14);
+                            uart.putchar(0x20);
+                            uart.putchar(0x00);
+                            uart.putchar(0x20);
+                            uart.putchar(0x00);
+                            uart.putchar(0x20);
+                            uart.putchar(0x00);
+                            uart.putchar(0x00);
+                            uart.putchar(0x7e);
+                        }
+                        delay(5);
+                    }
+                }
+
+                "w" => {
+                    for _ in 0..mount {
+                        uart.putchar(0xff);
+                        uart.putchar(0xfc);
+                        uart.putchar(0x05);
+                        uart.putchar(0x02);
+                        uart.putchar(0x60);
+                        uart.putchar(0x00);
+                        uart.putchar(0x67);
+                        println!("鸣笛");
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
