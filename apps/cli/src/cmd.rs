@@ -25,6 +25,8 @@ const CMD_TABLE: &[(&str, CmdHandler)] = &[
     ("uart", do_uart),
     ("go", do_go),
     ("moves", do_moves),
+    ("test_i2c", test_i2c),
+    ("i2c_init",i2c_init),
 ];
 
 fn do_uname(_args: &str) {
@@ -447,4 +449,30 @@ fn do_moves(args: &str) {
             }
         }
     }
+}
+fn  i2c_init(_str:&str) {
+    let str_addr1 = "ffff000028016000 65";
+    let str_addr2 = "ffff000028016004 78";
+    let str_addr3 = "ffff000028016014 d4";
+    let str_addr4 = "ffff000028016018 f9";
+    let str_addr5 = "ffff00002801601c 2a";
+    let str_addr6 = "ffff000028016020 4f";
+    let str_addr7 = "ffff000028016030 0";
+    let str_addr8 = "ffff00002801603c 3";
+
+    do_str(str_addr1);
+    do_str(str_addr2);
+    do_str(str_addr3);
+    do_str(str_addr4);
+    do_str(str_addr5);
+    do_str(str_addr6);
+    do_str(str_addr7);
+    do_str(str_addr8);
+
+    println!("i2c init success");
+
+}
+
+fn test_i2c(_str:&str) {
+    test()
 }
